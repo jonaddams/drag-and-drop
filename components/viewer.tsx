@@ -1,7 +1,6 @@
 "use client";
 
-import type { Instance, ViewState } from "@nutrient-sdk/viewer";
-import { List } from "@nutrient-sdk/viewer";
+import type { Instance, List, ViewState } from "@nutrient-sdk/viewer";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type EventHandler = (event: Event) => void;
@@ -175,9 +174,11 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 					let boundingBoxDimensions = { height: 55, width: 225 };
 
 					// Common calculations for positioning
+					// Use fixed offset so all field sizes align consistently
+					const horizontalOffset = 100; // Fixed pixel offset from cursor
 					const clientRect = new NutrientViewer.Geometry.Rect({
-						left: dragEvent.clientX,
-						top: dragEvent.clientY,
+						left: dragEvent.clientX - horizontalOffset,
+						top: dragEvent.clientY - boundingBoxDimensions.height / 2,
 						...boundingBoxDimensions,
 					});
 
@@ -205,7 +206,11 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 							// Create form field directly referencing the widget
 							const formField =
 								new NutrientViewer.FormFields.SignatureFormField({
-									annotationIds: List<string>([uniqueId]),
+									annotationIds: new (
+										NutrientViewer.Immutable.List as unknown as new (
+											items: string[],
+										) => List<string>
+									)([uniqueId]),
 									name: formFieldName, // Make sure this matches the formFieldName in the widget
 								});
 
@@ -219,10 +224,10 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 							// Set smaller size for date field
 							boundingBoxDimensions = { height: 55, width: 225 };
 
-							// Recalculate with new dimensions
+							// Recalculate with new dimensions using slightly adjusted offset
 							const dateClientRect = new NutrientViewer.Geometry.Rect({
-								left: dragEvent.clientX,
-								top: dragEvent.clientY,
+								left: dragEvent.clientX - horizontalOffset - 10,
+								top: dragEvent.clientY - boundingBoxDimensions.height / 2,
 								...boundingBoxDimensions,
 							});
 							const datePageRect = instance.transformContentClientToPageSpace(
@@ -243,7 +248,11 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 							});
 
 							const formField = new NutrientViewer.FormFields.TextFormField({
-								annotationIds: List<string>([dateUniqueId]),
+								annotationIds: new (
+									NutrientViewer.Immutable.List as unknown as new (
+										items: string[],
+									) => List<string>
+								)([dateUniqueId]),
 								name: dateFormFieldName,
 								// You can set a default date value if needed
 								value: "TBD: Date Signed",
@@ -259,10 +268,10 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 							// Smaller size for initials
 							boundingBoxDimensions = { height: 50, width: 50 };
 
-							// Recalculate with new dimensions
+							// Recalculate with new dimensions using slightly adjusted offset
 							const initialsClientRect = new NutrientViewer.Geometry.Rect({
-								left: dragEvent.clientX,
-								top: dragEvent.clientY,
+								left: dragEvent.clientX - horizontalOffset - 15,
+								top: dragEvent.clientY - boundingBoxDimensions.height / 2,
 								...boundingBoxDimensions,
 							});
 							const initialsPageRect =
@@ -285,7 +294,11 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 
 							const formField =
 								new NutrientViewer.FormFields.SignatureFormField({
-									annotationIds: List<string>([initialsUniqueId]),
+									annotationIds: new (
+										NutrientViewer.Immutable.List as unknown as new (
+											items: string[],
+										) => List<string>
+									)([initialsUniqueId]),
 									name: initialsFormFieldName,
 								});
 
@@ -313,7 +326,11 @@ export default function Viewer({ formCreatorMode }: ViewerProps) {
 
 							const formField =
 								new NutrientViewer.FormFields.SignatureFormField({
-									annotationIds: List<string>([defaultUniqueId]),
+									annotationIds: new (
+										NutrientViewer.Immutable.List as unknown as new (
+											items: string[],
+										) => List<string>
+									)([defaultUniqueId]),
 									name: defaultFormFieldName,
 								});
 
