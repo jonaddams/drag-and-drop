@@ -1,377 +1,439 @@
-'use client';
+"use client";
 
-import React, { useEffect, useRef, useState } from 'react';
-import { ViewState } from '@nutrient-sdk/viewer';
+import type { Instance, ViewState } from "@nutrient-sdk/viewer";
+import { List } from "@nutrient-sdk/viewer";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+type EventHandler = (event: Event) => void;
 
 // Enhanced version of closestByClass that logs the element structure for debugging
-function closestByClass(el: Element | Node | null, className: string): Element | null {
-  if (!el) return null;
+function closestByClass(
+	el: Element | Node | null,
+	className: string,
+): Element | null {
+	if (!el) return null;
 
-  // Check if element has classList and the target class
-  if (el instanceof Element && el.classList && el.classList.contains(className)) {
-    return el as Element;
-  }
+	// Check if element has classList and the target class
+	if (
+		el instanceof Element &&
+		el.classList &&
+		el.classList.contains(className)
+	) {
+		return el as Element;
+	}
 
-  // Also check if the className is in the string (alternative method)
-  if (el instanceof Element && el.className && typeof el.className === 'string' && el.className.includes(className)) {
-    return el as Element;
-  }
+	// Also check if the className is in the string (alternative method)
+	if (
+		el instanceof Element &&
+		el.className &&
+		typeof el.className === "string" &&
+		el.className.includes(className)
+	) {
+		return el as Element;
+	}
 
-  // Recursively check parent
-  return el.parentNode ? closestByClass(el.parentNode, className) : null;
+	// Recursively check parent
+	return el.parentNode ? closestByClass(el.parentNode, className) : null;
 }
 
 interface ViewerProps {
-  formCreatorMode: boolean;
+	formCreatorMode: boolean;
 }
 
 export default function Viewer({ formCreatorMode }: ViewerProps) {
-  const containerRef = useRef(null);
-  const [isViewerReady, setIsViewerReady] = useState(false);
-  const viewerInstanceRef = useRef<any>(null);
-  const eventHandlersRef = useRef<{ dragover: any; drop: any } | null>(null);
+	const containerRef = useRef(null);
+	const [_isViewerReady, setIsViewerReady] = useState(false);
+	const viewerInstanceRef = useRef<Instance | null>(null);
+	const eventHandlersRef = useRef<{
+		dragover: EventHandler;
+		drop: EventHandler;
+	} | null>(null);
 
-  // Update interaction mode when formCreatorMode changes
-  useEffect(() => {
-    const instance = viewerInstanceRef.current;
-    if (instance) {
-      const interactionMode = formCreatorMode
-        ? (window as any).NutrientViewer.InteractionMode.FORM_CREATOR
-        : (window as any).NutrientViewer.InteractionMode.DEFAULT;
+	// Helper function to clean up drag and drop handlers
+	const cleanupDragAndDrop = useCallback((instance: Instance) => {
+		if (instance?.contentDocument && eventHandlersRef.current) {
+			const { dragover, drop } = eventHandlersRef.current;
+			instance.contentDocument.removeEventListener("dragover", dragover);
+			instance.contentDocument.removeEventListener("drop", drop);
+			eventHandlersRef.current = null;
+		}
+	}, []);
 
-      console.log(`Setting interaction mode to: ${formCreatorMode ? 'FORM_CREATOR' : 'DEFAULT'}`);
+	// Helper function to set up drag and drop handlers
+	const setupDragAndDrop = useCallback(
+		(instance: Instance, enabled: boolean) => {
+			if (!window.NutrientViewer) return;
+			const { NutrientViewer } = window;
+			let _isDragAndDropSupported = false;
+			let label = "";
 
-      instance.setViewState((viewState: any) => viewState.set('interactionMode', interactionMode));
-    }
-  }, [formCreatorMode]);
+			// Dragover handler
+			const dragoverHandler = (event: Event): void => {
+				// Only allow drag over when Form Creator mode is enabled
+				if (!enabled) {
+					return;
+				}
 
-  // Initialize the viewer
-  useEffect(() => {
-    const container = containerRef.current;
-    let viewerInstance: any = null;
+				const dragEvent = event as DragEvent;
+				_isDragAndDropSupported = true;
 
-    // Only initialize if not already done
-    if (container && !viewerInstanceRef.current && (window as any).NutrientViewer) {
-      const { NutrientViewer } = window as any;
+				// Try to find the page element using various methods
+				let pageElement = null;
 
-      NutrientViewer.load({
-        container,
-        document: 'https://www.nutrient.io/downloads/pspdfkit-web-demo.pdf',
-        baseUrl: 'https://cdn.cloud.pspdfkit.com/pspdfkit-web@1.2.0/',
-      })
-        .then((instance: any) => {
-          viewerInstance = instance;
-          viewerInstanceRef.current = instance;
-          setIsViewerReady(true);
-          console.log('Viewer is ready');
+				// Method 1: Check if target or parent has the expected class
+				pageElement = closestByClass(
+					dragEvent.target as Element,
+					"PSPDFKit-Page",
+				);
 
-          // Set initial interaction mode based on formCreatorMode prop
-          const interactionMode = formCreatorMode ? NutrientViewer.InteractionMode.FORM_CREATOR : NutrientViewer.InteractionMode.DEFAULT;
+				// Method 2: If that doesn't work, check for alternative class names
+				if (!pageElement) {
+					pageElement = closestByClass(
+						dragEvent.target as Element,
+						"pspdfkit-page",
+					);
+				}
 
-          instance.setViewState((viewState: any) => viewState.set('interactionMode', interactionMode));
+				// Method 3: As a fallback, look for any element with 'page' in the class name
+				if (!pageElement) {
+					const target = dragEvent.target as Element;
+					if (target.classList) {
+						const allClasses = Array.from(target.classList);
+						const pageClasses = allClasses.filter((cls) =>
+							cls.toLowerCase().includes("page"),
+						);
+						if (pageClasses.length > 0) {
+							pageElement = target;
+						}
+					}
+				}
 
-          // Set up drag and drop handlers
-          setupDragAndDrop(instance, formCreatorMode);
-        })
-        .catch((error: any) => {
-          console.error('Error loading viewer:', error);
-        });
-    }
+				// Allow drop operation
+				if (pageElement) {
+					event.preventDefault();
+				}
+			};
 
-    return () => {
-      if (viewerInstance) {
-        console.log('Unloading viewer');
-        cleanupDragAndDrop(viewerInstance);
-        (window as any).NutrientViewer?.unload(container);
-        viewerInstanceRef.current = null;
-      }
-    };
-  }, []); // Empty dependency array as this should only run once on mount
+			// Drop handler
+			const dropHandler = async (event: Event) => {
+				// Only allow drop when Form Creator mode is enabled
+				if (!enabled) {
+					return;
+				}
 
-  // Setup drag and drop handlers whenever formCreatorMode changes
-  useEffect(() => {
-    const instance = viewerInstanceRef.current;
-    if (instance) {
-      // Clean up existing handlers first
-      cleanupDragAndDrop(instance);
+				const dragEvent = event as DragEvent;
+				// Always prevent default and stop propagation
+				event.preventDefault();
+				event.stopPropagation();
 
-      // Set up new handlers with current formCreatorMode
-      setupDragAndDrop(instance, formCreatorMode);
-    }
-  }, [formCreatorMode]);
+				console.log("Drop event occurred");
+				label = dragEvent.dataTransfer?.getData("text") || "";
+				console.log("Annotation type:", label);
 
-  // Helper function to set up drag and drop handlers
-  const setupDragAndDrop = (instance: any, enabled: boolean) => {
-    const { NutrientViewer } = window as any;
-    let isDragAndDropSupported = false;
-    let label = '';
+				// Try multiple methods to identify the page element
+				let pageElement = closestByClass(
+					dragEvent.target as Element,
+					"PSPDFKit-Page",
+				);
+				if (!pageElement) {
+					pageElement = closestByClass(
+						dragEvent.target as Element,
+						"pspdfkit-page",
+					);
+				}
 
-    // Dragover handler
-    const dragoverHandler = function (event: Event): void {
-      // Only allow drag over when Form Creator mode is enabled
-      if (!enabled) {
-        return;
-      }
+				// Fallback method - find any element with page in the class name
+				if (!pageElement) {
+					const target = dragEvent.target as Element;
+					if (target.classList) {
+						const allClasses = Array.from(target.classList);
+						const pageClasses = allClasses.filter((cls) =>
+							cls.toLowerCase().includes("page"),
+						);
+						if (pageClasses.length > 0) {
+							pageElement = target;
+						}
+					}
+				}
 
-      const dragEvent = event as DragEvent;
-      isDragAndDropSupported = true;
+				// If we still can't find a page element, try to get the page index via coordinate conversion
+				let pageIndex = 0;
+				if (pageElement) {
+					// Extract page index from the element's dataset or other attributes
+					pageIndex = parseInt(
+						(pageElement as HTMLElement).dataset.pageIndex || "0",
+						10,
+					);
+					console.log("Page element found, page index:", pageIndex);
+				} else {
+					// Fallback to page 0 if we can't determine the page
+					console.warn("No page element found, defaulting to page 0");
+				}
 
-      // Try to find the page element using various methods
-      let pageElement = null;
+				try {
+					// Different configurations based on annotation type
+					let boundingBoxDimensions = { height: 55, width: 225 };
 
-      // Method 1: Check if target or parent has the expected class
-      pageElement = closestByClass(dragEvent.target as Element, 'PSPDFKit-Page');
+					// Common calculations for positioning
+					const clientRect = new NutrientViewer.Geometry.Rect({
+						left: dragEvent.clientX,
+						top: dragEvent.clientY,
+						...boundingBoxDimensions,
+					});
 
-      // Method 2: If that doesn't work, check for alternative class names
-      if (!pageElement) {
-        pageElement = closestByClass(dragEvent.target as Element, 'pspdfkit-page');
-      }
+					const pageRect = instance.transformContentClientToPageSpace(
+						clientRect,
+						pageIndex,
+					);
 
-      // Method 3: As a fallback, look for any element with 'page' in the class name
-      if (!pageElement) {
-        const target = dragEvent.target as Element;
-        if (target.classList) {
-          const allClasses = Array.from(target.classList);
-          const pageClasses = allClasses.filter((cls) => cls.toLowerCase().includes('page'));
-          if (pageClasses.length > 0) {
-            pageElement = target;
-          }
-        }
-      }
+					// Generate a unique ID that will be used for both the widget and form field
+					const uniqueId = NutrientViewer.generateInstantId();
+					const formFieldName = `${label.toLowerCase()}-${uniqueId}`;
 
-      // Allow drop operation
-      if (pageElement) {
-        event.preventDefault();
-      }
-    };
+					// Create different annotation types based on the label
+					switch (label) {
+						case "Signature": {
+							// Create widget annotation
+							const widget = new NutrientViewer.Annotations.WidgetAnnotation({
+								boundingBox: pageRect,
+								formFieldName: formFieldName,
+								id: uniqueId,
+								pageIndex,
+								name: "Signature",
+							});
 
-    // Drop handler
-    const dropHandler = async function (event: Event) {
-      // Only allow drop when Form Creator mode is enabled
-      if (!enabled) {
-        return;
-      }
+							// Create form field directly referencing the widget
+							const formField =
+								new NutrientViewer.FormFields.SignatureFormField({
+									annotationIds: List<string>([uniqueId]),
+									name: formFieldName, // Make sure this matches the formFieldName in the widget
+								});
 
-      const dragEvent = event as DragEvent;
-      // Always prevent default and stop propagation
-      event.preventDefault();
-      event.stopPropagation();
+							// Create both objects in one go
+							await instance.create([widget, formField]);
+							console.log("Successfully created Signature annotation");
+							break;
+						}
 
-      console.log('Drop event occurred');
-      label = dragEvent.dataTransfer?.getData('text') || '';
-      console.log('Annotation type:', label);
+						case "DateSigned": {
+							// Set smaller size for date field
+							boundingBoxDimensions = { height: 55, width: 225 };
 
-      // Try multiple methods to identify the page element
-      let pageElement = closestByClass(dragEvent.target as Element, 'PSPDFKit-Page');
-      if (!pageElement) {
-        pageElement = closestByClass(dragEvent.target as Element, 'pspdfkit-page');
-      }
+							// Recalculate with new dimensions
+							const dateClientRect = new NutrientViewer.Geometry.Rect({
+								left: dragEvent.clientX,
+								top: dragEvent.clientY,
+								...boundingBoxDimensions,
+							});
+							const datePageRect = instance.transformContentClientToPageSpace(
+								dateClientRect,
+								pageIndex,
+							);
 
-      // Fallback method - find any element with page in the class name
-      if (!pageElement) {
-        const target = dragEvent.target as Element;
-        if (target.classList) {
-          const allClasses = Array.from(target.classList);
-          const pageClasses = allClasses.filter((cls) => cls.toLowerCase().includes('page'));
-          if (pageClasses.length > 0) {
-            pageElement = target;
-          }
-        }
-      }
+							// Generate a unique ID for date field
+							const dateUniqueId = NutrientViewer.generateInstantId();
+							const dateFormFieldName = `date-${dateUniqueId}`;
 
-      // If we still can't find a page element, try to get the page index via coordinate conversion
-      let pageIndex = 0;
-      if (pageElement) {
-        // Extract page index from the element's dataset or other attributes
-        pageIndex = parseInt((pageElement as HTMLElement).dataset.pageIndex || '0');
-        console.log('Page element found, page index:', pageIndex);
-      } else {
-        // Attempt to get the page at the dropped position
-        try {
-          const position = { x: dragEvent.clientX, y: dragEvent.clientY };
-          // Some viewer SDKs provide methods to get page from position
-          if (instance.getPageIndexFromClientPoint) {
-            pageIndex = instance.getPageIndexFromClientPoint(position.x, position.y);
-            console.log('Found page using position:', pageIndex);
-          } else {
-            console.error('No page element found and no method to get page from position');
-            // Still use page 0 as fallback
-          }
-        } catch (error) {
-          console.error('Error getting page from position:', error);
-        }
-      }
+							const widget = new NutrientViewer.Annotations.WidgetAnnotation({
+								boundingBox: datePageRect,
+								formFieldName: dateFormFieldName,
+								id: dateUniqueId,
+								pageIndex,
+								name: "Date Signed",
+							});
 
-      try {
-        // Different configurations based on annotation type
-        let boundingBoxDimensions = { height: 55, width: 225 };
+							const formField = new NutrientViewer.FormFields.TextFormField({
+								annotationIds: List<string>([dateUniqueId]),
+								name: dateFormFieldName,
+								// You can set a default date value if needed
+								value: "TBD: Date Signed",
+							});
 
-        // Common calculations for positioning
-        const clientRect = new NutrientViewer.Geometry.Rect({
-          left: dragEvent.clientX,
-          top: dragEvent.clientY,
-          ...boundingBoxDimensions,
-        });
+							// Create both objects in one go
+							await instance.create([widget, formField]);
+							console.log("Successfully created Date annotation");
+							break;
+						}
 
-        const pageRect = instance.transformContentClientToPageSpace(clientRect, pageIndex);
+						case "Initials": {
+							// Smaller size for initials
+							boundingBoxDimensions = { height: 50, width: 50 };
 
-        // Generate a unique ID that will be used for both the widget and form field
-        const uniqueId = NutrientViewer.generateInstantId();
-        const formFieldName = `${label.toLowerCase()}-${uniqueId}`;
+							// Recalculate with new dimensions
+							const initialsClientRect = new NutrientViewer.Geometry.Rect({
+								left: dragEvent.clientX,
+								top: dragEvent.clientY,
+								...boundingBoxDimensions,
+							});
+							const initialsPageRect =
+								instance.transformContentClientToPageSpace(
+									initialsClientRect,
+									pageIndex,
+								);
 
-        // Create different annotation types based on the label
-        switch (label) {
-          case 'Signature': {
-            // Create widget annotation
-            const widget = new NutrientViewer.Annotations.WidgetAnnotation({
-              boundingBox: pageRect,
-              formFieldName: formFieldName,
-              id: uniqueId,
-              pageIndex,
-              name: 'Signature',
-            });
+							// Generate a unique ID for initials field
+							const initialsUniqueId = NutrientViewer.generateInstantId();
+							const initialsFormFieldName = `initials-${initialsUniqueId}`;
 
-            // Create form field directly referencing the widget
-            const formField = new NutrientViewer.FormFields.SignatureFormField({
-              annotationIds: new (NutrientViewer.Immutable.List as any)([uniqueId]),
-              name: formFieldName, // Make sure this matches the formFieldName in the widget
-            });
+							const widget = new NutrientViewer.Annotations.WidgetAnnotation({
+								boundingBox: initialsPageRect,
+								formFieldName: initialsFormFieldName,
+								id: initialsUniqueId,
+								pageIndex,
+								name: "Initials",
+							});
 
-            // Create both objects in one go
-            await instance.create([widget, formField]);
-            console.log('Successfully created Signature annotation');
-            break;
-          }
+							const formField =
+								new NutrientViewer.FormFields.SignatureFormField({
+									annotationIds: List<string>([initialsUniqueId]),
+									name: initialsFormFieldName,
+								});
 
-          case 'DateSigned': {
-            // Set smaller size for date field
-            boundingBoxDimensions = { height: 55, width: 225 };
+							// Create both objects in one go
+							await instance.create([widget, formField]);
+							console.log("Successfully created Initials annotation");
+							break;
+						}
 
-            // Recalculate with new dimensions
-            const dateClientRect = new NutrientViewer.Geometry.Rect({
-              left: dragEvent.clientX,
-              top: dragEvent.clientY,
-              ...boundingBoxDimensions,
-            });
-            const datePageRect = instance.transformContentClientToPageSpace(dateClientRect, pageIndex);
+						default: {
+							// Handle unknown annotation types
+							console.log("Unknown annotation type:", label);
 
-            // Generate a unique ID for date field
-            const dateUniqueId = NutrientViewer.generateInstantId();
-            const dateFormFieldName = `date-${dateUniqueId}`;
+							// Generate a default ID
+							const defaultUniqueId = NutrientViewer.generateInstantId();
+							const defaultFormFieldName = `annotation-${defaultUniqueId}`;
 
-            const widget = new NutrientViewer.Annotations.WidgetAnnotation({
-              boundingBox: datePageRect,
-              formFieldName: dateFormFieldName,
-              id: dateUniqueId,
-              pageIndex,
-              name: 'Date Signed',
-            });
+							const widget = new NutrientViewer.Annotations.WidgetAnnotation({
+								boundingBox: pageRect,
+								formFieldName: defaultFormFieldName,
+								id: defaultUniqueId,
+								pageIndex,
+								name: label || "Annotation",
+							});
 
-            const formField = new NutrientViewer.FormFields.TextFormField({
-              annotationIds: new (NutrientViewer.Immutable.List as any)([dateUniqueId]),
-              name: dateFormFieldName,
-              // You can set a default date value if needed
-              value: 'TBD: Date Signed',
-            });
+							const formField =
+								new NutrientViewer.FormFields.SignatureFormField({
+									annotationIds: List<string>([defaultUniqueId]),
+									name: defaultFormFieldName,
+								});
 
-            // Create both objects in one go
-            await instance.create([widget, formField]);
-            console.log('Successfully created Date annotation');
-            break;
-          }
+							// Create both objects in one go
+							await instance.create([widget, formField]);
+							console.log("Successfully created default annotation");
+							break;
+						}
+					}
+				} catch (error) {
+					console.error("Error creating annotation:", error);
+				}
 
-          case 'Initials': {
-            // Smaller size for initials
-            boundingBoxDimensions = { height: 50, width: 50 };
+				return false;
+			};
 
-            // Recalculate with new dimensions
-            const initialsClientRect = new NutrientViewer.Geometry.Rect({
-              left: dragEvent.clientX,
-              top: dragEvent.clientY,
-              ...boundingBoxDimensions,
-            });
-            const initialsPageRect = instance.transformContentClientToPageSpace(initialsClientRect, pageIndex);
+			// Add event listeners
+			if (instance?.contentDocument) {
+				instance.contentDocument.addEventListener("dragover", dragoverHandler);
+				instance.contentDocument.addEventListener("drop", dropHandler);
 
-            // Generate a unique ID for initials field
-            const initialsUniqueId = NutrientViewer.generateInstantId();
-            const initialsFormFieldName = `initials-${initialsUniqueId}`;
+				// Store handlers for later cleanup
+				eventHandlersRef.current = {
+					dragover: dragoverHandler,
+					drop: dropHandler,
+				};
+			}
+		},
+		[],
+	);
 
-            const widget = new NutrientViewer.Annotations.WidgetAnnotation({
-              boundingBox: initialsPageRect,
-              formFieldName: initialsFormFieldName,
-              id: initialsUniqueId,
-              pageIndex,
-              name: 'Initials',
-            });
+	// Update interaction mode when formCreatorMode changes
+	useEffect(() => {
+		const instance = viewerInstanceRef.current;
+		if (instance && window.NutrientViewer) {
+			const interactionMode = formCreatorMode
+				? window.NutrientViewer.InteractionMode.FORM_CREATOR
+				: null;
 
-            const formField = new NutrientViewer.FormFields.SignatureFormField({
-              annotationIds: new (NutrientViewer.Immutable.List as any)([initialsUniqueId]),
-              name: initialsFormFieldName,
-            });
+			console.log(
+				`Setting interaction mode to: ${formCreatorMode ? "FORM_CREATOR" : "null"}`,
+			);
 
-            // Create both objects in one go
-            await instance.create([widget, formField]);
-            console.log('Successfully created Initials annotation');
-            break;
-          }
+			instance.setViewState((viewState: ViewState) =>
+				interactionMode
+					? viewState.set("interactionMode", interactionMode)
+					: viewState.set("interactionMode", null),
+			);
+		}
+	}, [formCreatorMode]);
 
-          default: {
-            // Handle unknown annotation types
-            console.log('Unknown annotation type:', label);
+	// Initialize the viewer
+	useEffect(() => {
+		const container = containerRef.current;
+		let viewerInstance: Instance | null = null;
 
-            // Generate a default ID
-            const defaultUniqueId = NutrientViewer.generateInstantId();
-            const defaultFormFieldName = `annotation-${defaultUniqueId}`;
+		// Only initialize if not already done
+		if (container && !viewerInstanceRef.current && window.NutrientViewer) {
+			const { NutrientViewer } = window;
 
-            const widget = new NutrientViewer.Annotations.WidgetAnnotation({
-              boundingBox: pageRect,
-              formFieldName: defaultFormFieldName,
-              id: defaultUniqueId,
-              pageIndex,
-              name: label || 'Annotation',
-            });
+			NutrientViewer.load({
+				container,
+				document: "https://www.nutrient.io/downloads/pspdfkit-web-demo.pdf",
+				baseUrl: "https://cdn.cloud.pspdfkit.com/pspdfkit-web@1.2.0/",
+			})
+				.then((instance: Instance) => {
+					viewerInstance = instance;
+					viewerInstanceRef.current = instance;
+					setIsViewerReady(true);
+					console.log("Viewer is ready");
 
-            const formField = new NutrientViewer.FormFields.SignatureFormField({
-              annotationIds: new (NutrientViewer.Immutable.List as any)([defaultUniqueId]),
-              name: defaultFormFieldName,
-            });
+					// Set initial interaction mode based on formCreatorMode prop
+					const interactionMode = formCreatorMode
+						? NutrientViewer.InteractionMode.FORM_CREATOR
+						: null;
 
-            // Create both objects in one go
-            await instance.create([widget, formField]);
-            console.log('Successfully created default annotation');
-            break;
-          }
-        }
-      } catch (error) {
-        console.error('Error creating annotation:', error);
-      }
+					instance.setViewState((viewState: ViewState) =>
+						interactionMode
+							? viewState.set("interactionMode", interactionMode)
+							: viewState.set("interactionMode", null),
+					);
 
-      return false;
-    };
+					// Set up drag and drop handlers
+					setupDragAndDrop(instance, formCreatorMode);
+				})
+				.catch((error: Error) => {
+					console.error("Error loading viewer:", error);
+				});
+		}
 
-    // Add event listeners
-    if (instance && instance.contentDocument) {
-      instance.contentDocument.addEventListener('dragover', dragoverHandler);
-      instance.contentDocument.addEventListener('drop', dropHandler);
+		return () => {
+			if (viewerInstance) {
+				console.log("Unloading viewer");
+				cleanupDragAndDrop(viewerInstance);
+				window.NutrientViewer?.unload(container);
+				viewerInstanceRef.current = null;
+			}
+		};
+	}, [
+		cleanupDragAndDrop,
+		formCreatorMode, // Set up drag and drop handlers
+		setupDragAndDrop,
+	]); // Empty dependency array as this should only run once on mount
 
-      // Store handlers for later cleanup
-      eventHandlersRef.current = {
-        dragover: dragoverHandler,
-        drop: dropHandler,
-      };
-    }
-  };
+	// Setup drag and drop handlers whenever formCreatorMode changes
+	useEffect(() => {
+		const instance = viewerInstanceRef.current;
+		if (instance) {
+			// Clean up existing handlers first
+			cleanupDragAndDrop(instance);
 
-  // Helper function to clean up drag and drop handlers
-  const cleanupDragAndDrop = (instance: any) => {
-    if (instance && instance.contentDocument && eventHandlersRef.current) {
-      const { dragover, drop } = eventHandlersRef.current;
-      instance.contentDocument.removeEventListener('dragover', dragover);
-      instance.contentDocument.removeEventListener('drop', drop);
-      eventHandlersRef.current = null;
-    }
-  };
+			// Set up new handlers with current formCreatorMode
+			setupDragAndDrop(instance, formCreatorMode);
+		}
+	}, [
+		formCreatorMode, // Clean up existing handlers first
+		cleanupDragAndDrop, // Set up new handlers with current formCreatorMode
+		setupDragAndDrop,
+	]);
 
-  // You must set the container height and width
-  return <div ref={containerRef} style={{ height: '100vh', width: '100%' }} />;
+	// You must set the container height and width
+	return <div ref={containerRef} style={{ height: "100vh", width: "100%" }} />;
 }
